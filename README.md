@@ -1,6 +1,9 @@
 # MoodMentor — Milestone 1
 
 AI-Powered Emotional Tone Analyzer and Well-Being Recommendation System.
+## 📸 Project Screenshot
+
+![MoodMentor Dashboard](frontend\photos\landpage.png)
 
 ## Milestone 1 scope (from the supplied PPT)
 - Text input and `.txt` / `.csv` upload
