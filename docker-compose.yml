@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: moodmentor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: moodmentor
+      POSTGRES_USER: moodmentor
+      POSTGRES_PASSWORD: moodmentor_local_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - moodmentor_pgdata:/var/lib/postgresql/data
+volumes:
+  moodmentor_pgdata:
