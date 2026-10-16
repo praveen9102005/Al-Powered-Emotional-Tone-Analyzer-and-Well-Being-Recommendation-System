@@ -334,7 +334,7 @@
 
                   <p className="hero-lede">
                     A little more clarity starts with a few words.
-                    MoodMentor analyzes the emotional tone of your writing
+                    EmotiSense analyzes the emotional tone of your writing
                     and helps you pause, reflect, and understand the sentiment.
                   </p>
 
@@ -539,7 +539,7 @@
                 <span className="auth-emblem">
                   <Brain size={32} />
                 </span>
-                <span className="eyebrow">WELCOME TO MOODMENTOR</span>
+                <span className="eyebrow">WELCOME TO EMOTISENSE </span>
                 <h1>A little clarity can change your day.</h1>
                 <p>
                   Make room for reflection with a thoughtful, simple view
