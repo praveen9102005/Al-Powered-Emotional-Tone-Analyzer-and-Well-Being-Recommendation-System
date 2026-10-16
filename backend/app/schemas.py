@@ -10,6 +10,11 @@ class LoginIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
 
+class UserUpdateIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    email: EmailStr
+
+
 class UserOut(BaseModel):
     id: int
     name: str
@@ -28,6 +33,8 @@ class AnalyzeIn(BaseModel):
 
 class AnalysisOut(BaseModel):
     id: int
+    original_text: str
+    source: str
     sentiment: str
     positive: float
     neutral: float

@@ -2,6 +2,11 @@
   import {
     Activity,
     ArrowRight,
+    BarChart3,
+    Clock3,
+    FileUp,
+    LayoutDashboard,
+    TrendingUp,
     Brain,
     Check,
     CircleHelp,
@@ -9,6 +14,10 @@
     Heart,
     History,
     LogOut,
+    Search,
+    Download,
+    UserRound,
+    Save,
     Menu,
     MessageSquareText,
     ShieldCheck,
@@ -50,12 +59,26 @@
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
     const [history, setHistory] = useState([]);
+    const [historySearch, setHistorySearch] = useState('');
+    const [historySentiment, setHistorySentiment] = useState('all');
+    const [profileName, setProfileName] = useState('');
+    const [profileEmail, setProfileEmail] = useState('');
+    const [profileBusy, setProfileBusy] = useState(false);
+    const [batchRows, setBatchRows] = useState([]);
+    const [batchResults, setBatchResults] = useState([]);
+    const [batchProgress, setBatchProgress] = useState(null);
     const [mobileOpen, setMobileOpen] = useState(false);
 
     useEffect(() => {
       if (token) {
-        api('/history', { token })
-          .then(setHistory)
+        api('/history', { token }).then(setHistory).catch(() => {});
+        api('/auth/me', { token })
+          .then((profile) => {
+            setProfileName(profile.name || '');
+            setProfileEmail(profile.email || '');
+            setUser(profile);
+            localStorage.setItem('mm_user', JSON.stringify(profile));
+          })
           .catch(() => {});
       }
     }, [token]);
@@ -96,7 +119,7 @@
         localStorage.setItem('mm_user', JSON.stringify(data.user));
 
         setPassword('');
-        go('analyzer');
+        go('dashboard');
 
         setNotice(
           `Welcome${
@@ -127,6 +150,33 @@
       setError('');
       setNotice('');
       setResult(null);
+      setBatchResults([]);
+
+      if (batchRows.length > 0) {
+        setBusy(true);
+        try {
+          const formData = new FormData();
+          const csvContent = Papa.unparse({
+            fields: ['text'],
+            data: batchRows.map((row) => [row.text]),
+          });
+          formData.append('file', new Blob([csvContent], { type: 'text/csv;charset=utf-8' }), 'moodmentor-upload.csv');
+          const data = await api('/analyze/csv', { method: 'POST', token, body: formData });
+          setBatchResults(data.results || []);
+          setBatchProgress({
+            total: data.total_rows ?? (data.results || []).length,
+            successful: data.successful ?? 0,
+            failed: data.failed ?? 0,
+          });
+          setNotice(`CSV analysis completed: ${data.successful ?? 0} successful, ${data.failed ?? 0} failed.`);
+          if (token) api('/history', { token }).then(setHistory).catch(() => {});
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
 
       if (!text.trim()) {
         setError('Please enter some text before analyzing.');
@@ -164,16 +214,16 @@
     async function handleFile(file) {
       setError('');
       setNotice('');
-
+      setBatchRows([]);
+      setBatchResults([]);
+      setBatchProgress(null);
       if (!file) return;
 
       const ext = file.name.split('.').pop().toLowerCase();
-
       if (!['txt', 'csv'].includes(ext)) {
         setError('Please upload a .txt or .csv file.');
         return;
       }
-
       if (file.size > 1024 * 1024) {
         setError('Please choose a file smaller than 1 MB.');
         return;
@@ -181,34 +231,112 @@
 
       try {
         const content = await file.text();
-        let extracted = content;
-
         if (ext === 'csv') {
           const parsed = Papa.parse(content, {
+            header: true,
             skipEmptyLines: true,
+            transformHeader: (header) => header.trim().replace(/^\uFEFF/, ''),
           });
+          const fields = parsed.meta?.fields || [];
+          const textHeader = fields.find((field) => field.trim().toLowerCase() === 'text');
+          if (!textHeader) {
+            setError("Your CSV must contain a column named 'text'. Example: text");
+            return;
+          }
+          const rows = parsed.data.map((row, index) => ({
+            rowNumber: index + 2,
+            text: String(row[textHeader] ?? '').trim(),
+          })).filter((row) => row.text.length > 0);
 
-          extracted = parsed.data
-            .map((row) => Array.isArray(row) ? row[0] : row)
-            .filter(Boolean)
-            .join('\n');
-        }
-
-        if (!extracted.trim()) {
-          setError('This file appears to be empty. Add text and try again.');
+          if (!rows.length) {
+            setError("No non-empty text rows found in the CSV's 'text' column.");
+            return;
+          }
+          if (rows.length > 1000) {
+            setError('Please upload a CSV containing no more than 1,000 non-empty text rows.');
+            return;
+          }
+          setBatchRows(rows);
+          setText(rows.slice(0, 5).map((row) => row.text).join('\n\n') +
+            (rows.length > 5 ? `\n\n…and ${rows.length - 5} more rows.` : ''));
+          setResult(null);
+          go('analyzer');
+          setNotice(`${file.name} loaded: ${rows.length} text rows ready for individual analysis. Select Analyze sentiment to process every row.`);
           return;
         }
 
-        setText(extracted.slice(0, 20000));
+        if (!content.trim()) {
+          setError('This file appears to be empty. Add text and try again.');
+          return;
+        }
+        setText(content.slice(0, 20000));
         setResult(null);
+        setBatchRows([]);
         go('analyzer');
-        setNotice(
-          `${file.name} loaded. Review the text, then select Analyze sentiment.`
-        );
+        setNotice(`${file.name} loaded. Review the text, then select Analyze sentiment.`);
       } catch {
         setError('Could not read this file. Please try another .txt or .csv file.');
       }
     }
+
+    async function saveProfile(e) {
+      e.preventDefault();
+      setError('');
+      setNotice('');
+      setProfileBusy(true);
+      try {
+        const updated = await api('/auth/me', {
+          method: 'PATCH',
+          token,
+          body: JSON.stringify({
+            name: profileName.trim(),
+            email: profileEmail.trim(),
+          }),
+        });
+        setUser(updated);
+        setProfileName(updated.name || '');
+        setProfileEmail(updated.email || '');
+        localStorage.setItem('mm_user', JSON.stringify(updated));
+        setNotice('Profile updated successfully.');
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setProfileBusy(false);
+      }
+    }
+
+    function downloadSingleReport(item = result) {
+      if (!item) return;
+      const report = [{
+        id: item.id ?? '',
+        text: item.original_text ?? text,
+        sentiment: item.sentiment ?? '',
+        positive: item.positive ?? '',
+        neutral: item.neutral ?? '',
+        negative: item.negative ?? '',
+        compound: item.compound ?? '',
+        token_count: item.token_count ?? '',
+        processed_text: item.processed_text ?? '',
+        created_at: item.created_at ?? new Date().toISOString(),
+      }];
+      const csv = Papa.unparse(report);
+      const blob = new Blob(['\\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'emotisense-analysis-report.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    const filteredHistory = history.filter((item) => {
+      const query = historySearch.trim().toLowerCase();
+      const matchesSearch = !query ||
+        String(item.original_text || '').toLowerCase().includes(query) ||
+        String(item.sentiment || '').toLowerCase().includes(query);
+      const matchesSentiment = historySentiment === 'all' || item.sentiment === historySentiment;
+      return matchesSearch && matchesSentiment;
+    });
 
     const sentimentColor =
       result?.sentiment === 'positive'
@@ -222,8 +350,18 @@
       user?.name ||
       user?.full_name ||
       user?.fullName ||
-      user?.full_name ||
       '';
+
+    const dashboardStats = {
+      total: history.length,
+      positive: history.filter((item) => item.sentiment === 'positive').length,
+      neutral: history.filter((item) => item.sentiment === 'neutral').length,
+      negative: history.filter((item) => item.sentiment === 'negative').length,
+      average: history.length
+        ? history.reduce((sum, item) => sum + Number(item.compound || 0), 0) / history.length
+        : 0,
+    };
+    const sentimentTotal = Math.max(dashboardStats.total, 1);
 
     return (
       <div className="app-shell">
@@ -266,6 +404,7 @@
               Text analyzer
             </button>
 
+
             {token && (
               <button
                 onClick={() => go('history')}
@@ -278,12 +417,15 @@
             {user ? (
               <>
                 {/* Logged-in user's full name */}
-                <span
-                  className="navbar-user-name"
-                  title={displayName}
+                <button
+                  type="button"
+                  className={`navbar-user-name ${page === 'dashboard' ? 'nav-active' : ''}`}
+                  title={`Open ${displayName || 'your'} dashboard`}
+                  onClick={() => go('dashboard')}
+                  aria-label={`Open dashboard for ${displayName || 'user'}`}
                 >
                   {displayName || 'User'}
-                </span>
+                </button>
 
                 <button className="nav-user" onClick={signOut}>
                   <LogOut size={16} />
@@ -537,7 +679,7 @@
             <section className="auth-layout">
               <div className="auth-aside">
                 <span className="auth-emblem">
-                  <Brain size={32} />
+                  <Sparkles size={17} />
                 </span>
                 <span className="eyebrow">WELCOME TO EMOTISENSE </span>
                 <h1>A little clarity can change your day.</h1>
@@ -553,7 +695,7 @@
                   <Check size={17} /> Revisit your text insights
                 </div>
                 <div className="auth-benefit">
-                  <Check size={17} /> Built around your well-being
+                  <Check size={17} /> Built around your well-being  
                 </div>
               </div>
 
@@ -669,6 +811,71 @@
             </section>
           )}
 
+          {page === 'dashboard' && token && (
+            <section className="dashboard-page">
+              <div className="dashboard-welcome">
+                <div>
+                  <span className="eyebrow">PERSONAL WELLNESS OVERVIEW</span>
+                  <h1>Welcome back, {displayName.split(' ')[0] || 'there'} <span className="welcome-spark">✦</span></h1>
+                  <p>Your emotional insights, recent activity, and reports — all in one place.</p>
+                </div>
+                <button className="btn btn-primary" onClick={() => { setText(''); setResult(null); setBatchRows([]); go('analyzer'); }}>
+                  <Sparkles size={17} /> New analysis
+                </button>
+              </div>
+
+              <div className="dashboard-quick-grid">
+                <button className="dashboard-quick-card" onClick={() => { setText(''); setResult(null); setBatchRows([]); go('analyzer'); }}>
+                  <span className="quick-icon quick-purple"><MessageSquareText size={20} /></span>
+                  <span><b>Analyze text</b><small>Understand a reflection</small></span><ArrowRight size={17} />
+                </button>
+                <button className="dashboard-quick-card" onClick={() => go('analyzer')}>
+                  <span className="quick-icon quick-blue"><FileUp size={20} /></span>
+                  <span><b>Batch analysis</b><small>Upload a CSV dataset</small></span><ArrowRight size={17} />
+                </button>
+                <button className="dashboard-quick-card" onClick={() => go('history')}>
+                  <span className="quick-icon quick-green"><History size={20} /></span>
+                  <span><b>View history</b><small>Revisit saved insights</small></span><ArrowRight size={17} />
+                </button>
+                <button className="dashboard-quick-card" onClick={() => go('profile')}>
+                  <span className="quick-icon quick-orange"><UserRound size={20} /></span>
+                  <span><b>Account settings</b><small>Manage your details</small></span><ArrowRight size={17} />
+                </button>
+              </div>
+
+              <div className="dashboard-stat-grid">
+                <article className="dashboard-stat-card"><span className="stat-icon stat-indigo"><Activity size={19} /></span><span className="stat-label">Saved analyses</span><strong>{dashboardStats.total}</strong><small>Across your recent history</small></article>
+                <article className="dashboard-stat-card"><span className="stat-icon stat-green"><Heart size={19} /></span><span className="stat-label">Positive tone</span><strong>{dashboardStats.positive}</strong><small>{Math.round(dashboardStats.positive / sentimentTotal * 100)}% of saved analyses</small></article>
+                <article className="dashboard-stat-card"><span className="stat-icon stat-amber"><Activity size={19} /></span><span className="stat-label">Neutral tone</span><strong>{dashboardStats.neutral}</strong><small>{Math.round(dashboardStats.neutral / sentimentTotal * 100)}% of saved analyses</small></article>
+                <article className="dashboard-stat-card"><span className="stat-icon stat-rose"><TrendingUp size={19} /></span><span className="stat-label">Average compound</span><strong>{dashboardStats.total ? `${dashboardStats.average > 0 ? '+' : ''}${dashboardStats.average.toFixed(2)}` : '—'}</strong><small>Range −1.00 to +1.00</small></article>
+              </div>
+
+              <div className="dashboard-content-grid">
+                <section className="dashboard-card sentiment-overview">
+                  <div className="dashboard-card-heading"><div><span className="eyebrow">YOUR ACTIVITY</span><h2>Sentiment overview</h2></div><span className="dashboard-heading-icon"><BarChart3 size={19} /></span></div>
+                  <p className="dashboard-muted">A breakdown of sentiment labels in your saved analysis history.</p>
+                  {[['Positive', dashboardStats.positive, 'positive'], ['Neutral', dashboardStats.neutral, 'neutral'], ['Negative', dashboardStats.negative, 'negative']].map(([label, value, key]) => (
+                    <div className="dashboard-bar-row" key={key}><div><span>{label}</span><b>{value} <small>({Math.round(value / sentimentTotal * 100)}%)</small></b></div><div className="dashboard-bar-track"><i className={`dashboard-bar-fill ${key}`} style={{ width: `${value / sentimentTotal * 100}%` }} /></div></div>
+                  ))}
+                  {!history.length && <div className="dashboard-empty-note">Your chart will fill in after you sign in and save your first analysis.</div>}
+                </section>
+
+                <section className="dashboard-card recent-activity">
+                  <div className="dashboard-card-heading"><div><span className="eyebrow">LATEST RECORDS</span><h2>Recent analyses</h2></div><button className="dashboard-text-button" onClick={() => go('history')}>View all <ArrowRight size={14} /></button></div>
+                  {history.slice(0, 5).length ? history.slice(0, 5).map((item) => (
+                    <button className="dashboard-recent-item" key={item.id} onClick={() => { setResult({ ...item, text: item.original_text }); setText(item.original_text || ''); setBatchRows([]); go('analyzer'); }}>
+                      <span className={`recent-sentiment-dot ${item.sentiment}`} />
+                      <span className="recent-item-copy"><b>{(item.sentiment || 'neutral').charAt(0).toUpperCase() + (item.sentiment || 'neutral').slice(1)} sentiment</b><small>{(item.original_text || 'No text available').slice(0, 72)}{(item.original_text || '').length > 72 ? '…' : ''}</small><small><Clock3 size={12} /> {item.created_at ? new Date(item.created_at).toLocaleDateString() : 'Recently'}</small></span>
+                      <strong>{Number(item.compound) > 0 ? '+' : ''}{Number(item.compound || 0).toFixed(2)}</strong>
+                    </button>
+                  )) : <div className="dashboard-empty-state"><span><History size={23} /></span><b>No saved analyses yet</b><p>Start with a short reflection to see your insights here.</p><button className="btn btn-primary" onClick={() => go('analyzer')}>Start analyzing</button></div>}
+                </section>
+              </div>
+
+              <div className="dashboard-footer-note"><ShieldCheck size={16} /><span>Your insights are personal. Sentiment scores are language estimates, not a diagnosis.</span><button onClick={() => go('profile')}>Manage account</button></div>
+            </section>
+          )}
+
           {page === 'analyzer' && (
             <section className="workspace">
               <div className="page-intro">
@@ -694,6 +901,9 @@
                     onChange={(e) => {
                       setText(e.target.value);
                       setResult(null);
+                      setBatchRows([]);
+                      setBatchResults([]);
+                      setBatchProgress(null);
                     }}
                     maxLength={20000}
                     placeholder="Write a few sentences about how you're feeling…"
@@ -760,7 +970,45 @@
                     </div>
                   </div>
 
-                  {result ? (
+                  {batchResults.length > 0 ? (
+                    <div className="batch-results">
+                      <div className="batch-summary">
+                        <div><b>{batchProgress?.total ?? batchResults.length}</b><span>Total rows</span></div>
+                        <div><b>{batchProgress?.successful ?? 0}</b><span>Successful</span></div>
+                        <div><b>{batchProgress?.failed ?? 0}</b><span>Failed</span></div>
+                      </div>
+                      <p className="batch-hint">Each CSV text row is analyzed independently. IDs are sequential within this uploaded file.</p>
+                      <div className="batch-table-wrap">
+                        <table className="batch-table">
+                          <thead><tr><th>ID</th><th>Text</th><th>Sentiment</th><th>Compound</th><th>Status</th></tr></thead>
+                          <tbody>
+                            {batchResults.map((item, index) => (
+                              <tr key={`${item.row_number ?? index}-${index}`}>
+                                <td>{index + 1}</td>
+                                <td className="batch-text-cell">{item.text}</td>
+                                <td>{item.status === 'success' ? <span className={`batch-sentiment ${item.sentiment}`}>{item.sentiment}</span> : '—'}</td>
+                                <td>{item.status === 'success' && typeof item.compound === 'number' ? `${item.compound > 0 ? '+' : ''}${item.compound.toFixed(2)}` : '—'}</td>
+                                <td>{item.status === 'success' ? <span className="batch-status success">Analyzed</span> : <span className="batch-status failed">{item.message || 'Failed'}</span>}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <button className="btn btn-secondary" onClick={() => {
+                        const headers = ['id', 'text', 'sentiment', 'compound', 'status', 'message'];
+                        const lines = [headers.join(','), ...batchResults.map((item, index) =>
+                          headers.map((key) => JSON.stringify(String(key === 'id' ? index + 1 : key === 'status' ? item.status : (item[key] ?? '')))).join(',')
+                        )];
+                        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = 'moodmentor-analysis-results.csv';
+                        link.click();
+                        URL.revokeObjectURL(url);
+                      }}><FileText size={16} /> Download results CSV</button>
+                    </div>
+                  ) : result ? (
                     <>
                       <div className={`result-hero ${sentimentColor}`}>
                         <span className="result-label">OVERALL SENTIMENT</span>
@@ -856,6 +1104,9 @@
                         {token ? ' to your history' : ' for this session'}
                         <span>VADER baseline</span>
                       </div>
+                      <button className="btn btn-secondary report-download" onClick={() => downloadSingleReport(result)}>
+                        <Download size={16} /> Download analysis report
+                      </button>
                     </>
                   ) : (
                     <div className="empty-result">
@@ -893,68 +1144,116 @@
             </section>
           )}
 
+          {page === 'profile' && (
+            <section className="history-page profile-page">
+              <div className="page-intro">
+                <span className="eyebrow">YOUR ACCOUNT</span>
+                <h1>My Profile</h1>
+                <p>Manage the details connected to your EmotiSense account.</p>
+              </div>
+              <div className="panel profile-panel">
+                <div className="profile-heading">
+                  <span className="profile-avatar"><UserRound size={28} /></span>
+                  <div><h2>{profileName || displayName || 'Your profile'}</h2><p>Member since {user?.created_at ? new Date(user.created_at).toLocaleDateString() : 'EmotiSense member'}</p></div>
+                </div>
+                <form onSubmit={saveProfile} className="profile-form">
+                  <label>Full name
+                    <input value={profileName} onChange={(e) => setProfileName(e.target.value)} minLength={2} maxLength={100} required />
+                  </label>
+                  <label>Email address
+                    <input type="email" value={profileEmail} onChange={(e) => setProfileEmail(e.target.value)} required />
+                  </label>
+                  {error && <div className="alert alert-error">{error}</div>}
+                  {notice && <div className="alert alert-success">{notice}</div>}
+                  <button className="btn btn-primary" type="submit" disabled={profileBusy}>
+                    <Save size={16} /> {profileBusy ? 'Saving…' : 'Save changes'}
+                  </button>
+                </form>
+                <p className="privacy-note">Your profile changes are saved to your account when the backend update succeeds.</p>
+              </div>
+            </section>
+          )}
+
           {page === 'history' && (
             <section className="history-page">
               <div className="page-intro">
                 <span className="eyebrow">YOUR REFLECTION SPACE</span>
                 <h1>Analysis history</h1>
-                <p>Revisit your recent sentiment analyses.</p>
+                <p>Search, filter, reopen and export your recent sentiment analyses.</p>
               </div>
 
-              {history.length ? (
+              <div className="history-tools panel">
+                <label className="history-search">
+                  <Search size={17} />
+                  <input
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    placeholder="Search saved text or sentiment..."
+                  />
+                </label>
+                <select value={historySentiment} onChange={(e) => setHistorySentiment(e.target.value)} aria-label="Filter by sentiment">
+                  <option value="all">All sentiments</option>
+                  <option value="positive">Positive</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="negative">Negative</option>
+                </select>
+                <button className="btn btn-secondary" onClick={() => {
+                  const rows = filteredHistory.map((item) => ({
+                    id: item.id,
+                    text: item.original_text || '',
+                    sentiment: item.sentiment,
+                    positive: item.positive,
+                    neutral: item.neutral,
+                    negative: item.negative,
+                    compound: item.compound,
+                    token_count: item.token_count,
+                    created_at: item.created_at,
+                  }));
+                  const csv = Papa.unparse(rows);
+                  const url = URL.createObjectURL(new Blob(['\\uFEFF', csv], { type: 'text/csv;charset=utf-8;' }));
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = 'emotisense-history.csv';
+                  link.click();
+                  URL.revokeObjectURL(url);
+                }} disabled={!history.length}>
+                  <Download size={16} /> Export history
+                </button>
+              </div>
+
+              {filteredHistory.length ? (
                 <div className="history-list">
-                  {history.map((item) => (
-                    <button
-                      className="history-item"
-                      key={item.id}
-                      onClick={() => {
-                        setResult(item);
-                        setText('');
+                  {filteredHistory.map((item) => (
+                    <div className="history-item history-item-row" key={item.id}>
+                      <button className="history-open" onClick={() => {
+                        setResult({ ...item, text: item.original_text });
+                        setText(item.original_text || '');
+                        setBatchRows([]);
                         go('analyzer');
-                      }}
-                    >
-                      <span className={`history-sentiment ${item.sentiment}`}>
-                        {item.sentiment === 'positive'
-                          ? '☺'
-                          : item.sentiment === 'negative'
-                            ? '☹'
-                            : '◉'}
-                      </span>
-
-                      <span className="history-copy">
-                        <b>
-                          {item.sentiment[0].toUpperCase() +
-                            item.sentiment.slice(1)}{' '}
-                          sentiment
-                        </b>
-                        <small>
-                          {new Date(item.created_at).toLocaleString()} ·{' '}
-                          {item.token_count} tokens
-                        </small>
-                      </span>
-
-                      <strong>
-                        {item.compound > 0 ? '+' : ''}
-                        {item.compound.toFixed(2)}
-                      </strong>
-                      <ArrowRight size={17} />
-                    </button>
+                      }}>
+                        <span className={`history-sentiment ${item.sentiment}`}>
+                          {item.sentiment === 'positive' ? '☺' : item.sentiment === 'negative' ? '☹' : '◉'}
+                        </span>
+                        <span className="history-copy">
+                          <b>{(item.sentiment || 'neutral').charAt(0).toUpperCase() + (item.sentiment || 'neutral').slice(1)} sentiment</b>
+                          <small>{item.original_text || 'Text not included in this history record'}</small>
+                          <small>{item.created_at ? new Date(item.created_at).toLocaleString() : ''} · {item.token_count} tokens</small>
+                        </span>
+                        <strong>{Number(item.compound) > 0 ? '+' : ''}{Number(item.compound || 0).toFixed(2)}</strong>
+                        <ArrowRight size={17} />
+                      </button>
+                      <button className="history-export" title="Download this report" onClick={() => downloadSingleReport(item)}>
+                        <Download size={16} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               ) : (
                 <div className="panel history-empty">
                   <span className="empty-icon"><History size={26} /></span>
-                  <h2>No saved analyses yet</h2>
-                  <p>
-                    Once you analyze text while signed in, your results will
-                    appear here.
-                  </p>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => go('analyzer')}
-                  >
-                    Analyze text <ArrowRight size={16} />
-                  </button>
+                  <h2>{history.length ? 'No matching analyses' : 'No saved analyses yet'}</h2>
+                  <p>{history.length ? 'Try another search or sentiment filter.' : 'Analyze text while signed in and your results will appear here.'}</p>
+                  <button className="btn btn-primary" onClick={() => go('analyzer')}>Analyze text <ArrowRight size={16} /></button>
                 </div>
               )}
             </section>

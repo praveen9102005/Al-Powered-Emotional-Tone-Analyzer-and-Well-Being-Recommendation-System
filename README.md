@@ -30,11 +30,10 @@ Login and registration are included as a usable project foundation. Deep BERT/Di
    .\.venv\Scripts\Activate.ps1
    pip install -r requirements.txt
    uvicorn app.main:app --reload --port 8000
-      .\.venv\Scripts\Activate.ps1
-python -m uvicorn app.main:app --reload --port 8000
+
 
    ```
-
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 
    If `py` is unavailable, use `python` instead. Edit `backend/.env` to match your PostgreSQL credentials.
 4. Frontend (new terminal):
