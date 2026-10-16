@@ -1,9 +1,9 @@
-# MoodMentor — Milestone 1
+# EmotiSense — Milestone 1
 
 AI-Powered Emotional Tone Analyzer and Well-Being Recommendation System.
 ## 📸 Project Screenshot
 
-![MoodMentor Dashboard](frontend\photos\landpage.png)
+![MoodMentor Dashboard](Screenshot%202026-10-16%20131044.png)
 
 ## Milestone 1 scope (from the supplied PPT)
 - Text input and `.txt` / `.csv` upload
@@ -20,7 +20,7 @@ Login and registration are included as a usable project foundation. Deep BERT/Di
 - PostgreSQL 14+ (or use Docker Compose)
 
 ## Quick start (Windows PowerShell)
-1. Create the database: if not using Docker, create a PostgreSQL database named `moodmentor`.
+1. Create the database: if not using Docker, create a PostgreSQL database named `EmotiSense`.
 2. Start PostgreSQL with Docker (optional): from the project root run `docker compose up -d db`.
 3. Backend:
    ```powershell
