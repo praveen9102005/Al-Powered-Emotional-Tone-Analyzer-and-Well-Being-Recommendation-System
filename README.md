@@ -3,7 +3,7 @@
 AI-Powered Emotional Tone Analyzer and Well-Being Recommendation System.
 ## 📸 Project Screenshot
 
-![MoodMentor Dashboard](Screenshot%202026-10-16%20131044.png)
+![EmotiSense Dashboard](Screenshot%202026-10-16%20131044.png)
 
 ## Milestone 1 scope (from the supplied PPT)
 - Text input and `.txt` / `.csv` upload
